@@ -118,7 +118,9 @@ def train(args):
     train_ds = ChatDataset(train_rows, tok, args.max_len)
     val_ds = ChatDataset(val_rows, tok, args.max_len) if val_rows else None
 
-    bf16 = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
+    # bf16 solo su GPU Ampere o più recenti: su T4 torch lo "supporta" in emulazione,
+    # ma il Trainer lo rifiuta. Lì si usa fp16.
+    bf16 = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] >= 8
     dtype = torch.bfloat16 if bf16 else (torch.float16 if torch.cuda.is_available() else torch.float32)
     model = AutoModelForCausalLM.from_pretrained(
         args.base, dtype=dtype, device_map="auto",
