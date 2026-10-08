@@ -5,7 +5,7 @@ migliaia di repository GitHub, e un'**app Android** per usarlo offline sul telef
 
 ```
 GitHub (1000+ repo di siti)  ──►  dataset (richiesta → sito)  ──►  LoRA su Qwen2.5-Coder  ──►  GGUF  ──►  app Android (llama.cpp)
-   scraper/scrape_repos.py          scraper/build_dataset.py        training/ (Colab GPU)                   android/
+   scraper/scrape_repos.py          scraper/build_dataset.py        training/ (Kaggle GPU)                  android/
 ```
 
 ## Struttura
@@ -16,7 +16,8 @@ GitHub (1000+ repo di siti)  ──►  dataset (richiesta → sito)  ──► 
 | `scraper/build_dataset.py` | Unisce CSS/JS in un unico file HTML per pagina, sostituisce le immagini con placeholder, rimuove analytics/email, filtra per qualità della UI (responsive, flex/grid, tag semantici…), deduplica e genera la richiesta in linguaggio naturale (IT/EN) che descrive ogni sito. |
 | `training/train_lora.py` | Fine-tuning LoRA di `Qwen2.5-Coder-1.5B-Instruct` (o 3B) sul dataset; `--merge` unisce la LoRA. |
 | `training/export_gguf.sh` | Converte il modello in GGUF (q8_0 o q4_k_m) per llama.cpp. |
-| `training/Vextor_Colab.ipynb` | Notebook Colab che fa tutto: dataset → training → prova → export → upload. |
+| `training/Vextor_Kaggle.ipynb` | Notebook Kaggle (consigliato): dataset → training → prova → export GGUF, gira da solo con *Save & Run All*. |
+| `training/Vextor_Colab.ipynb` | Stesso notebook per Google Colab; salva il GGUF su Google Drive. |
 | `android/` | App chat Android (Kotlin + Compose) con inferenza on-device via llama.cpp, anteprima del sito in WebView, salvataggio/condivisione dell'HTML. |
 | `.github/workflows/android.yml` | Compila l'APK su GitHub a ogni modifica di `android/` e lo pubblica nella release **apk-latest**. |
 | `.github/workflows/dataset.yml` | Esegue lo scraping su GitHub Actions e pubblica il dataset nella release **dataset-latest**. |
@@ -59,9 +60,19 @@ sorgente e licenza del repo originale.
 
 ## 3. Addestrare il modello
 
-Serve una GPU: apri `training/Vextor_Colab.ipynb` in Google Colab
-(*File → Apri notebook → GitHub*), seleziona runtime GPU ed esegui le celle.
-Se il codice non è ancora sul branch `main`, cambia `BRANCH` nella prima cella.
+Serve una GPU gratuita. Nessun token: il repo è pubblico e il notebook scarica da solo codice e dataset.
+
+**Kaggle (consigliato)**
+1. Su [kaggle.com](https://www.kaggle.com) (account con telefono verificato): *Create → New Notebook*,
+   poi *File → Import Notebook* e carica `training/Vextor_Kaggle.ipynb`.
+2. Pannello *Settings*: **Accelerator → GPU T4 x2**, **Internet → On**.
+3. **Save Version → Save & Run All (Commit)**: il training gira sui server Kaggle anche a browser chiuso
+   (~1–2 ore). Alla fine scarica `vextor-q8_0.gguf` dalla scheda **Output** della versione.
+
+**Colab:** apri `training/Vextor_Colab.ipynb`, runtime GPU T4, *Esegui tutto*; il file finisce in
+*Il mio Drive/Vextor/*.
+
+Se il codice non è ancora sul branch `main`, i notebook usano già il branch di sviluppo (`BRANCH`).
 
 In locale con GPU NVIDIA:
 
@@ -74,14 +85,13 @@ bash training/export_gguf.sh out/vextor-merged out/vextor-q8_0.gguf q8_0
 
 | GPU | Modello | `--max-len` | Tempo indicativo (1 epoca, ~1500 esempi) |
 |---|---|---|---|
-| T4 16 GB (Colab gratis) | 1.5B | 6144 | 1–2 h |
+| T4 16 GB (Kaggle/Colab gratis) | 1.5B | 6144 | 30–60 min |
 | L4 / A100 | 1.5B o 3B | 8192 | 30–90 min |
 
 ## 4. Usare il tuo modello nell'app
 
-- Carica il `.gguf` su Hugging Face (il notebook lo fa per te) e incolla il link in
-  *Modelli → Scarica dal link*, **oppure**
-- copia il file sul telefono e usa *Modelli → Scegli file .gguf*.
+- Scarica il `.gguf` sul telefono (Output di Kaggle o Google Drive) e usa *Modelli → Scegli file .gguf*, **oppure**
+- caricalo dove vuoi con un link diretto (es. Hugging Face) e usa *Modelli → Scarica dal link*.
 
 Il system prompt dell'app è lo stesso usato nel training, così il modello risponde sempre con un
 unico file HTML completo.
