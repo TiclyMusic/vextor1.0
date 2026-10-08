@@ -316,7 +316,7 @@ def main():
     ap.add_argument("--out", default="data/raw", help="cartella di output")
     ap.add_argument("--max-repos", type=int, default=1200, help="quanti repo scaricare")
     ap.add_argument("--candidates", type=int, default=0,
-                    help="quanti candidati raccogliere dalla ricerca (default: 2.5x max-repos)")
+                    help="quanti candidati raccogliere dalla ricerca (default: 1.8x max-repos)")
     ap.add_argument("--min-stars", type=int, default=5)
     ap.add_argument("--any-license", action="store_true",
                     help="includi anche repo senza licenza permissiva (sconsigliato)")
@@ -337,7 +337,7 @@ def main():
         cands = json.loads(cand_file.read_text("utf-8"))
         print(f"Riprendo da {cand_file} ({len(cands)} candidati)")
     else:
-        n = args.candidates or int(args.max_repos * 2.5)
+        n = args.candidates or int(args.max_repos * 1.8)
         cands = search_candidates(gh, n, None if args.any_license else PERMISSIVE_LICENSES, args.min_stars)
         cand_file.write_text(json.dumps(cands, ensure_ascii=False, indent=1), "utf-8")
         print(f"Salvati {len(cands)} candidati in {cand_file}")

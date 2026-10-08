@@ -48,11 +48,11 @@ Il risultato finisce nella release **dataset-latest** (`dataset.tar.gz`).
 ```bash
 pip install -r scraper/requirements.txt
 export GITHUB_TOKEN=ghp_...                      # https://github.com/settings/tokens
-python scraper/scrape_repos.py --max-repos 1200  # -> data/raw/
+python scraper/scrape_repos.py --max-repos 4000  # -> data/raw/
 python scraper/build_dataset.py                  # -> data/dataset/train.jsonl, val.jsonl
 ```
 
-Opzioni utili di `build_dataset.py`: `--pages-per-repo 2`, `--max-chars 24000`, `--min-score 5`,
+Opzioni utili di `build_dataset.py`: `--pages-per-repo 3`, `--max-chars 24000`, `--min-score 5`,
 `--variants 2` (più richieste diverse per lo stesso sito).
 Ogni esempio è una conversazione `system → user (richiesta) → assistant (```html …```)`, con
 sorgente e licenza del repo originale.

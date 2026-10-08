@@ -57,6 +57,15 @@ CDN_FALLBACK_JS = {
     "scrollreveal": "https://unpkg.com/scrollreveal@4.0.9/dist/scrollreveal.min.js",
 }
 
+VENDOR_CSS = re.compile(
+    r"(\.min\.css$|(^|/)(vendor|vendors|lib|libs|plugins?|third[-_]?party)/|"
+    r"owl|slick|carousel|icon|icofont|themify|materialdesign|glightbox|magnific|fancybox|"
+    r"meanmenu|sweetalert|animate|reset|normalize|font|aos|swiper|lightbox|nice-select|"
+    r"bootstrap|tailwind-runtime|splide|flickity|venobox|boxicons|remixicon|line-?awesome|"
+    r"simple-line|feather|hamburgers|preloader|cursor)",
+    re.I,
+)
+
 # Parole chiave -> tipo di sito (it, en)
 SITE_KINDS = [
     (r"weather|calculator|todo|quiz|game|clock|timer", ("una piccola web app", "a small web app")),
@@ -238,10 +247,12 @@ def inline_page(html: str, page_path: str, files_dir: Path) -> str:
             css = read_text(files_dir / p)
             if css is None:
                 cdn = cdn_for(p, CDN_FALLBACK_CSS)
-                if cdn is None:
-                    # senza il suo CSS la pagina non rappresenta il design reale
-                    raise SkipPage(f"CSS mancante: {p}")
-                return f'<link rel="stylesheet" href="{cdn}">'
+                if cdn:
+                    return f'<link rel="stylesheet" href="{cdn}">'
+                if VENDOR_CSS.search(p):
+                    return ""  # libreria accessoria (icone, caroselli...): si può togliere
+                # senza il suo CSS principale la pagina non rappresenta il design reale
+                raise SkipPage(f"CSS mancante: {p}")
             css = inline_css_imports(css, p, files_dir)
             css = fix_css_urls(css)
             return f"<style>\n{css.strip()}\n</style>"
@@ -309,6 +320,116 @@ def fix_assets(html: str) -> str:
     return html
 
 
+# --------------------------------------------------------------------------- CSS non usato
+
+def _split_top(text: str, sep: str) -> list[str]:
+    """Divide su `sep` ignorando parentesi e stringhe (per liste di selettori)."""
+    out, depth, cur, quote = [], 0, [], ""
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+        elif ch in "([":
+            depth += 1
+        elif ch in ")]":
+            depth -= 1
+        elif ch == sep and depth == 0:
+            out.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    out.append("".join(cur))
+    return out
+
+
+def _css_blocks(css: str):
+    """Genera (prelude, body) dei blocchi di primo livello; None se il CSS è malformato."""
+    i, n = 0, len(css)
+    blocks = []
+    while i < n:
+        j = css.find("{", i)
+        if j < 0:
+            break
+        prelude = css[i:j]
+        depth, k, quote = 1, j + 1, ""
+        while k < n and depth:
+            ch = css[k]
+            if quote:
+                if ch == quote and css[k - 1] != "\\":
+                    quote = ""
+            elif ch in "\"'":
+                quote = ch
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            k += 1
+        if depth:
+            return None
+        # @import/@charset senza blocco prima del selettore
+        stmts = prelude.split(";")
+        for st in stmts[:-1]:
+            if st.strip():
+                blocks.append((st.strip() + ";", None))
+        blocks.append((stmts[-1].strip(), css[j + 1:k - 1]))
+        i = k
+    return blocks
+
+
+SEL_TOKEN = re.compile(r"([.#])(-?[A-Za-z_][\w-]*)")
+
+
+def prune_css(css: str, used: set[str]) -> str:
+    """Rimuove le regole i cui selettori usano classi/id assenti dalla pagina."""
+    blocks = _css_blocks(css)
+    if blocks is None:
+        return css
+    out = []
+    for prelude, body in blocks:
+        if body is None:
+            out.append(prelude)
+            continue
+        low = prelude.lower()
+        if low.startswith(("@media", "@supports", "@layer", "@container")):
+            inner = prune_css(body, used)
+            if inner.strip():
+                out.append(f"{prelude} {{\n{inner}\n}}")
+            continue
+        if low.startswith("@"):
+            out.append(f"{prelude} {{{body}}}")
+            continue
+        kept = []
+        for sel in _split_top(prelude, ","):
+            # i token ".5" di valori tipo "0.5" non stanno nei selettori
+            names = [m.group(2) for m in SEL_TOKEN.finditer(re.sub(r"\[[^\]]*\]|\([^)]*\)", "", sel))]
+            if all(name in used for name in names):
+                kept.append(sel.strip())
+        if kept:
+            out.append(", ".join(kept) + " {" + body + "}")
+    return "\n".join(out)
+
+
+def used_names(html: str) -> set[str]:
+    used = set()
+    for m in re.finditer(r"""\b(?:class|id|for|data-[\w-]+)\s*=\s*["']([^"']*)["']""", html, re.I):
+        used.update(m.group(1).split())
+    # classi/id usati dal JavaScript (classList, querySelector, stringhe...)
+    for m in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, re.I | re.S):
+        used.update(re.findall(r"[A-Za-z_][\w-]*", m.group(1)))
+    return used
+
+
+def prune_unused_css(html: str) -> str:
+    used = used_names(html)
+    return re.sub(r"(<style\b[^>]*>)(.*?)(</style>)",
+                  lambda m: m.group(1) + "\n" + prune_css(m.group(2), used).strip() + "\n" + m.group(3),
+                  html, flags=re.I | re.S)
+
+
 def normalize_indent(text: str) -> str:
     """Riporta l'indentazione a 2 spazi per livello (meno token, stesso codice)."""
     lines = text.replace("\t", "    ").splitlines()
@@ -350,6 +471,7 @@ def clean(html: str) -> str:
     html = re.sub(r"<svg\b(?:(?!</svg>).){3000,}?</svg>",
                   '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">'
                   '<circle cx="12" cy="12" r="10" fill="currentColor"/></svg>', html, flags=re.S)
+    html = prune_unused_css(html)
     html = normalize_indent(html)
     # spazi
     html = "\n".join(line.rstrip() for line in html.splitlines())
@@ -568,8 +690,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--raw", default="data/raw")
     ap.add_argument("--out", default="data/dataset")
-    ap.add_argument("--pages-per-repo", type=int, default=2)
-    ap.add_argument("--min-chars", type=int, default=1500)
+    ap.add_argument("--pages-per-repo", type=int, default=3)
+    ap.add_argument("--min-chars", type=int, default=1000)
     ap.add_argument("--max-chars", type=int, default=24000,
                     help="lunghezza massima della pagina finale (~3.5 caratteri per token)")
     ap.add_argument("--min-score", type=int, default=5)
@@ -601,8 +723,8 @@ def main():
                 continue
             try:
                 html = inline_page(html, page, files_dir)
-            except SkipPage:
-                stats["skip_bundler"] += 1
+            except SkipPage as e:
+                stats["skip_missing_css" if str(e).startswith("CSS mancante") else "skip_bundler"] += 1
                 continue
             except Exception:
                 stats["skip_error"] += 1
@@ -611,8 +733,11 @@ def main():
             if re.search(r"\{\{|\{%|<\?php|<%=|\bv-for=|\bng-repeat", html):
                 stats["skip_template_lang"] += 1
                 continue
-            if not (args.min_chars <= len(html) <= args.max_chars):
-                stats["skip_length"] += 1
+            if len(html) < args.min_chars:
+                stats["skip_too_short"] += 1
+                continue
+            if len(html) > args.max_chars:
+                stats["skip_too_long"] += 1
                 continue
             info = PageInfo()
             try:

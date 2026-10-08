@@ -10,10 +10,10 @@ on:
     inputs:
       max_repos:
         description: "Numero di repo da scaricare"
-        default: "1200"
+        default: "4000"
       pages_per_repo:
         description: "Pagine HTML per repo"
-        default: "2"
+        default: "3"
       max_chars:
         description: "Lunghezza massima di una pagina (caratteri)"
         default: "24000"
@@ -42,12 +42,12 @@ jobs:
         env:
           # Un Personal Access Token (secret SCRAPER_TOKEN) alza il limite a 5000 richieste/ora.
           GITHUB_TOKEN: ${{ secrets.SCRAPER_TOKEN || github.token }}
-        run: python scraper/scrape_repos.py --max-repos "${{ inputs.max_repos || '1200' }}" --out data/raw
+        run: python scraper/scrape_repos.py --max-repos "${{ inputs.max_repos || '4000' }}" --out data/raw
 
       - name: Costruisci il dataset
         run: |
           python scraper/build_dataset.py --raw data/raw --out data/dataset \
-            --pages-per-repo "${{ inputs.pages_per_repo || '2' }}" --max-chars "${{ inputs.max_chars || '24000' }}"
+            --pages-per-repo "${{ inputs.pages_per_repo || '3' }}" --max-chars "${{ inputs.max_chars || '24000' }}"
           cp data/candidates.json data/dataset/
           tar -czf dataset.tar.gz -C data dataset
           tar -czf raw.tar.gz -C data raw
@@ -60,7 +60,10 @@ jobs:
             raw.tar.gz
           retention-days: 14
 
+      # Se la release non si può creare (permessi del token), il dataset resta
+      # comunque scaricabile come artifact "dataset" (il notebook Colab lo gestisce).
       - name: Pubblica release "dataset-latest"
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
