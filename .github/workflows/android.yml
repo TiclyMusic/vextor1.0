@@ -29,10 +29,12 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - uses: android-actions/setup-android@v3
-
+      # l'Android SDK è già presente sul runner (ANDROID_HOME)
       - name: NDK e CMake
-        run: sdkmanager --install "ndk;29.0.13113456" "cmake;3.31.6" "platforms;android-36" "build-tools;36.0.0" > /dev/null
+        run: |
+          SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin | sort -V | tail -1)/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" --install "ndk;29.0.13113456" "cmake;3.31.6" "platforms;android-36" "build-tools;36.0.0" > /dev/null
 
       - uses: gradle/actions/setup-gradle@v4
 
