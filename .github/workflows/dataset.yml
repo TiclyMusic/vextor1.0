@@ -1,0 +1,72 @@
+name: Dataset (scraping GitHub)
+
+on:
+  # parte da solo quando cambia lo scraper (e quindi al primo push)
+  push:
+    paths:
+      - "scraper/**"
+      - ".github/workflows/dataset.yml"
+  workflow_dispatch:
+    inputs:
+      max_repos:
+        description: "Numero di repo da scaricare"
+        default: "1200"
+      pages_per_repo:
+        description: "Pagine HTML per repo"
+        default: "2"
+      max_chars:
+        description: "Lunghezza massima di una pagina (caratteri)"
+        default: "24000"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dataset
+  cancel-in-progress: true
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r scraper/requirements.txt
+
+      - name: Scarica i repo
+        env:
+          # Un Personal Access Token (secret SCRAPER_TOKEN) alza il limite a 5000 richieste/ora.
+          GITHUB_TOKEN: ${{ secrets.SCRAPER_TOKEN || github.token }}
+        run: python scraper/scrape_repos.py --max-repos "${{ inputs.max_repos || '1200' }}" --out data/raw
+
+      - name: Costruisci il dataset
+        run: |
+          python scraper/build_dataset.py --raw data/raw --out data/dataset \
+            --pages-per-repo "${{ inputs.pages_per_repo || '2' }}" --max-chars "${{ inputs.max_chars || '24000' }}"
+          cp data/candidates.json data/dataset/
+          tar -czf dataset.tar.gz -C data dataset
+          tar -czf raw.tar.gz -C data raw
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dataset
+          path: |
+            dataset.tar.gz
+            raw.tar.gz
+          retention-days: 14
+
+      - name: Pubblica release "dataset-latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete dataset-latest --yes --cleanup-tag || true
+          gh release create dataset-latest dataset.tar.gz \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Dataset Vextor" \
+            --notes "$(cat data/dataset/stats.json)"
